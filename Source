@@ -1,0 +1,161 @@
+# Install and load necessary packages
+required_packages <- c("httr", "jsonlite", "purrr", "rugarch", "dplyr", "tidyr", "openxlsx", "ggplot2", "lmtest", "zoo", "bigrquery", "DBI")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+lapply(required_packages, library, character.only = TRUE)
+
+# Function to get options data
+get_options_data <- function(apikey, symbol) {
+  url <- paste0("https://api.tdameritrade.com/v1/marketdata/chains?",
+                "apikey=", apikey,
+                "&symbol=", symbol,
+                "&contractType=ALL&strategy=ANALYTICAL&optionType=S")
+  
+  response <- GET(url)
+  
+  if (http_status(response)$category != "Success") {
+    warning("Failed to fetch data")
+    return(NULL)
+  }
+  
+  data <- content(response, "text", encoding = "UTF-8")
+  json_data <- fromJSON(data, flatten = TRUE)
+  
+  return(json_data)
+}
+
+# Initialize API key and other parameters
+apikey <- "GV3QJACWYLRD7HLBCYIQMW1ENFRUMY2K"
+consumer_key <- apikey # Use the same API key
+symbol <- "MSTR"
+
+# Fetch options data
+options_data <- get_options_data(consumer_key, symbol)
+
+if (is.null(options_data)) {
+  stop("Failed to fetch options data.")
+}
+
+# Assume call_exp_data is the nested data structure you have
+call_exp_data <- options_data$callExpDateMap
+
+# Create an empty data frame to hold the results
+call_exp_df <- data.frame()
+
+# Iterate through the dates
+for (date in names(call_exp_data)) {
+  date_data <- call_exp_data[[date]]
+  
+  # Iterate through the strikes for the current date
+  for (strike in names(date_data)) {
+    strike_data <- date_data[[strike]]
+    
+    # Convert the strike data into a data frame
+    strike_df <- as.data.frame(strike_data)
+    
+    # Add date and strike columns
+    strike_df$date <- date
+    strike_df$strike <- strike
+    
+    # Bind the current strike data to the result
+    call_exp_df <- bind_rows(call_exp_df, strike_df)
+  }
+}
+
+# Now, call_exp_df should be a flat data frame with the desired information
+print(call_exp_df)
+
+write.xlsx(call_exp_df, "options_data.xlsx")
+getwd()
+
+
+symbol <- "MSTR"
+apikey <- ".........."
+url <- paste0("https://api.tdameritrade.com/v1/marketdata/", symbol, "/pricehistory")
+
+query_params <- list(
+  apikey = apikey,
+  periodType = "year",
+  period = 3,
+  frequencyType = "daily",
+  frequency = 1,
+  needExtendedHoursData = "false"
+)
+
+print(paste0("Sending request to: ", url))
+print("With query parameters:")
+print(query_params)
+
+response <- GET(url, query = query_params)
+
+print("Received response:")
+content_text <- content(response, "text") # Add this line
+
+# Parse the JSON content
+data_list <- fromJSON(content_text)
+
+# Create a data frame
+df <- as.data.frame(data_list$candles)
+
+# Convert the datetime to a Date object
+df$datetime <- as.Date(as.POSIXct(df$datetime/1000, origin="1970-01-01"))
+
+# Plotting
+ggplot(df, aes(x=datetime, y=close)) +
+  geom_line() +
+  ggtitle("Price History for MSTR") +
+  xlab("Date") +
+  ylab("Close Price")
+# Saving the options data to an Excel file
+write.xlsx(call_exp_df, "options_data.xlsx")
+
+# Saving the historical stock price data to another Excel file
+write.xlsx(df, "historical_stock_data.xlsx")
+
+print("Files saved successfully!")
+
+# Authenticate with your service account
+bq_auth(path = "C:\\Users\\Shiloh\\Documents\\lucky-leaf................json")
+
+# Load necessary libraries
+library(bigrquery)
+library(DBI)
+
+# Authenticate with your service account
+bq_auth(path = "C:/Users/Shiloh/Documents/lucky-leaf............json")
+
+# Set your project ID
+project_id <- "lucky-leaf-....."
+
+# Read the extracted data
+data <- readxl::read_xlsx("C:/Users/Shiloh/Documents/extracted_data_SNP500.xlsx")
+
+# Create a combined list of tickers and company names
+search_terms <- unique(c(data$Ticker, data$Company.Name))
+
+# Determine the date to be used for comparison
+two_days_ago <- Sys.Date() - 2
+formatted_date <- format(two_days_ago, format = "%Y%m%d")
+
+# Formulate the SQL query using the determined date
+sql <- sprintf("
+  SELECT 
+    DocumentIdentifier, V2Themes
+  FROM 
+    `gdelt-bq.gdeltv2.gkg_partitioned`
+  WHERE 
+    CAST(DATE AS STRING) >= '%s'
+    AND REGEXP_CONTAINS(V2Themes, r'%s')
+", formatted_date, pattern)
+
+# Then, run the query
+mentions <- bq_table_download(bq_project_query(project_id, sql))
+
+
+# Process the mentions to rank companies based on mentions
+company_mentions <- sapply(search_terms, function(term) sum(grepl(term, mentions$V2Themes, ignore.case = TRUE)))
+
+# Rank the top 20 companies by mentions
+top_companies <- names(sort(company_mentions, decreasing = TRUE)[1:20])
+
+print(top_companies)
